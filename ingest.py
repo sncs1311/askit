@@ -1,3 +1,4 @@
+from chunker import semantic_chunk, fixed_chunk
 import pdfplumber
 import uuid
 from sentence_transformers import SentenceTransformer
@@ -7,24 +8,6 @@ model = SentenceTransformer("all-MiniLM-L6-v2")
 
 client = chromadb.PersistentClient(path="./chroma_store")
 collection = client.get_or_create_collection(name="documents")
-
-
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = start + chunk_size
-        chunk = text[start:end]
-        if end < len(text):
-            last_space = chunk.rfind(' ')
-            if last_space != -1:
-                end = start + last_space
-                chunk = text[start:end]
-        if chunk.strip():
-            chunks.append(chunk.strip())
-        start = end - overlap
-    return chunks
-
 
 def ingest_pdf(file_path: str, filename: str) -> dict:
     all_text = ""
@@ -40,7 +23,23 @@ def ingest_pdf(file_path: str, filename: str) -> dict:
     if not all_text.strip():
         return {"error": "No text could be extracted. PDF may be scanned — OCR coming in Phase 10."}
 
-    chunks = chunk_text(all_text)
+    # NEW — Phase 2: semantic chunking with fixed fallback
+    try:
+        chunks = semantic_chunk(all_text)
+
+        # Safety net: if semantic chunking returns too few chunks
+        # (can happen with very short or poorly formatted PDFs)
+        if len(chunks) < 3:
+            chunks = fixed_chunk(all_text)
+            chunking_method = "fixed_fallback"
+        else:
+            chunking_method = "semantic"
+
+    except Exception as e:
+        # If semantic chunking crashes on weird input, fall back gracefully
+        print(f"Semantic chunking failed: {e}. Using fixed chunking.")
+        chunks = fixed_chunk(all_text)
+        chunking_method = "fixed_fallback"
     embeddings = model.encode(chunks).tolist()
 
     ids = [str(uuid.uuid4()) for _ in chunks]
@@ -59,5 +58,6 @@ def ingest_pdf(file_path: str, filename: str) -> dict:
     return {
         "filename": filename,
         "pages_processed": page_count,
-        "chunks_stored": len(chunks)
+        "chunks_stored": len(chunks),
+        "chunking_method": chunking_method
     }
