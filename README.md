@@ -69,13 +69,13 @@ Most RAG tutorials build the same thing: split a PDF into fixed chunks → embed
 │      │                                                      │
 │      ▼                                                      │
 │  ┌─────────────┐                                            │
-│  │ File Router │ ── detects type ──────────────────────┐   │
-│  └─────────────┘                                       │   │
-│       │              │              │           │       │   │
-│       ▼              ▼              ▼           ▼       ▼   │
-│   Documents      Structured      Code        PPTX   Scanner│
-│   (pdfplumber    (openpyxl       (AST +      (pptx   (OCR) │
-│    python-docx)   → SQLite)    tree-sitter)  parser)       │
+│  │ File Router │ ── detects type ──────────────────────┐    │
+│  └─────────────┘     |              |           |      │    │
+│       │              │              │           │      │    │
+│       ▼              ▼              ▼           ▼      ▼    │
+│   Documents      Structured      Code        PPTX   Scanner │
+│   (pdfplumber    (openpyxl       (AST +      (pptx   (OCR)  │
+│    python-docx)   → SQLite)    tree-sitter)  parser)        │
 │       │                                                     │
 │       ▼                                                     │
 │  Semantic Chunker → sentence-transformers → ChromaDB        │
