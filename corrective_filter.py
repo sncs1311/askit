@@ -17,7 +17,7 @@ VECTOR_WEIGHT = 0.7
 KEYWORD_WEIGHT = 0.3
 
 # Chunks below this score are dropped before reaching the LLM
-DEFAULT_THRESHOLD = 0.35
+DEFAULT_THRESHOLD = 0.20
 
 
 def extract_content_words(text: str) -> set[str]:
@@ -61,10 +61,28 @@ def score_chunk(chunk: dict, query: str) -> float:
         matches = query_words & chunk_words
         keyword_overlap = len(matches) / len(query_words)
 
-    # ── Combined score ────────────────────────────────────────────────────
-    final_score = (VECTOR_WEIGHT * vector_score) + (KEYWORD_WEIGHT * keyword_overlap)
+    # ── NEW: boost for section header match ──────────────────────────
+    # If query mentions a section name that appears in chunk header,
+    # boost the score — "summary section" should find SUMMARY chunk
+    section_boost = 0.0
+    section_keywords = {
+        'summary', 'project', 'skill', 'education', 'experience',
+        'language', 'framework', 'tool', 'achievement', 'certification'
+    }
+    query_lower = query.lower()
+    chunk_lower = chunk['text'].lower()
 
-    return round(final_score, 4)
+    for kw in section_keywords:
+        if kw in query_lower and kw in chunk_lower[:50]:
+            # Keyword appears in query AND near start of chunk (header area)
+            section_boost = 0.2
+            break
+    # ── END boost ────────────────────────────────────────────────────
+
+    # ── Combined score ────────────────────────────────────────────────────
+    final_score = (VECTOR_WEIGHT * vector_score) + (KEYWORD_WEIGHT * keyword_overlap) + section_boost
+
+    return round(min(1.0, final_score), 4)
 
 
 def filter_chunks(

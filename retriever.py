@@ -1,3 +1,4 @@
+from entity_graph import entity_graph
 from corrective_filter import filter_chunks, compute_confidence
 from sql_router import try_sql_route
 from sentence_transformers import SentenceTransformer
@@ -127,35 +128,51 @@ def retrieve(query: str, n_results: int = 5) -> list[dict]:
     return merged[:n_results]
 
 def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
-    
-    # Step 0: document-level questions about structured data
+
+    # Step 0: document-level questions
     from sql_router import describe_structured_data
     desc_result = describe_structured_data(query)
     if desc_result:
         return desc_result
 
-    # Step 1: analytical SQL route
+    # Step 1: SQL route
     sql_result = try_sql_route(query)
     if sql_result:
         return sql_result
 
-    # Step 2: check collection not empty
+    # Step 2: empty collection check
     if collection.count() == 0:
         return {
             "answer": "This information is not in the uploaded documents.",
             "confidence": 0.0,
             "confidence_label": "no_support",
             "sources": [],
-            "route": "none"
+            "route": "vector_abstained"
         }
 
-    # Step 3: hybrid retrieval — fetch more than needed for filtering
-    raw_chunks = retrieve(query, n_results * 2)
+    # Step 3: hybrid retrieval
+    raw_chunks = retrieve(query, max(n_results*3, 15))
 
-    # Step 4: corrective filter — drop irrelevant chunks
+    # ── Step 4: graph augmentation (NEW) ─────────────────────────────────
+    # Find chunk_ids connected to query entities in the knowledge graph
+    graph_chunk_ids = entity_graph.query_graph(query)
+
+    if graph_chunk_ids:
+        # Fetch those chunks from ChromaDB
+        graph_chunks = fetch_chunks_by_ids(graph_chunk_ids)
+
+        # Merge with hybrid results — deduplicate by text
+        seen_texts = {c["text"] for c in raw_chunks}
+        for gc in graph_chunks:
+            if gc["text"] not in seen_texts:
+                raw_chunks.append(gc)
+                seen_texts.add(gc["text"])
+    # ── End graph augmentation ────────────────────────────────────────────
+
+    # Step 5: corrective filter
     filtered_chunks = filter_chunks(raw_chunks, query)
 
-    # Step 5: abstention — nothing passed the filter
+    # Step 6: abstention
     if not filtered_chunks:
         return {
             "answer": "This information is not in the uploaded documents.",
@@ -165,11 +182,39 @@ def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
             "route": "vector_abstained"
         }
 
-    # Step 6: trim to n_results after filtering
+    # Step 7: trim + generate
     filtered_chunks = filtered_chunks[:n_results]
-
-    # Step 7: generate answer from filtered chunks
     from generator import generate_answer
     result = generate_answer(query, filtered_chunks)
-    result["route"] = "vector"
+    result["route"] = "vector+graph"
     return result
+
+def fetch_chunks_by_ids(chunk_ids: list[str]) -> list[dict]:
+    """
+    Fetch specific chunks from ChromaDB by their IDs.
+    Used to retrieve graph-recommended chunks.
+    """
+    if not chunk_ids:
+        return []
+
+    try:
+        results = collection.get(
+            ids=chunk_ids,
+            include=["documents", "metadatas"]
+        )
+    except Exception:
+        return []
+
+    chunks = []
+    for i, doc in enumerate(results["documents"]):
+        chunks.append({
+            "text": doc,
+            "filename": results["metadatas"][i]["filename"],
+            "chunk_index": results["metadatas"][i]["chunk_index"],
+            # Graph-retrieved chunks get a neutral distance
+            # Corrective filter will score them properly
+            "distance": 0.4,
+            "source": "entity_graph"
+        })
+
+    return chunks

@@ -41,25 +41,24 @@ def natural_language_to_sql(query: str, schema: dict) -> str | None:
         schema_text += f"\nTable '{table}' columns: {', '.join(columns)}"
 
     prompt = f"""You are a SQL expert working with SQLite.
-Convert the user's question into a SQL SELECT query using the available tables.
+Convert the user's question into a SQL SELECT query.
 
 Available tables:
 {schema_text}
 
 Rules:
-- Return ONLY the SQL. No explanation, no markdown, no backticks.
-- Only SELECT statements. Never INSERT, UPDATE, DELETE, DROP.
+- Return ONLY the SQL query. Nothing else. No explanation. No second line.
+- Stop after the semicolon. Do not write anything after the SQL ends.
+- Only SELECT statements.
 - Use exact table and column names from the schema.
-- For lookup/search questions use: SELECT * FROM table WHERE column LIKE '%value%'
-- For name/identity questions use LIKE with % wildcards for fuzzy matching
-- For ID-based questions use: WHERE id_column = number
-- For analytical questions use: SUM(), COUNT(), AVG(), MAX(), MIN()
-- If truly unanswerable from schema, return: CANNOT_ANSWER
+- For lookup/search questions: SELECT * FROM table WHERE column LIKE '%value%'
+- For analytical questions: use SUM(), COUNT(), AVG(), MAX(), MIN()
 - LIMIT results to 20 rows unless asking for totals/counts
+- If truly unanswerable, return exactly: CANNOT_ANSWER
 
 Question: {query}
 
-SQL:"""
+SQL (one statement only, nothing after the semicolon):"""
 
     try:
         response = requests.post(
@@ -68,7 +67,37 @@ SQL:"""
             timeout=30
         )
         sql = response.json()["response"].strip()
+
+        # Strip markdown fences
         sql = re.sub(r'```sql|```', '', sql).strip()
+
+        # ── NEW: take only the first statement ───────────────────────
+        # LLMs sometimes append explanation after the semicolon
+        # Split on semicolon, take first part, re-add semicolon
+        if ';' in sql:
+            sql = sql.split(';')[0].strip() + ';'
+
+        # Strip any remaining newlines or text after the SQL
+        # (catches cases where LLM adds text without a semicolon)
+        lines = sql.strip().split('\n')
+        sql_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Stop collecting if we hit a non-SQL line
+            if stripped and not stripped.upper().startswith(('SELECT','FROM','WHERE',
+               'JOIN','LEFT','RIGHT','INNER','GROUP','ORDER','HAVING','LIMIT',
+               'AND','OR','ON','AS','DISTINCT','COUNT','SUM','AVG','MAX','MIN',
+               'LIKE','IN','NOT','IS','NULL','BY','ASC','DESC','CASE','WHEN',
+               'THEN','ELSE','END','UNION','WITH','--')):
+                # Check if it looks like SQL continuation or explanation
+                if any(sql_lines):  # only break if we already have SQL
+                    break
+            sql_lines.append(line)
+
+        sql = '\n'.join(sql_lines).strip()
+        if not sql.endswith(';'):
+            sql = sql + ';'
+        # ── END NEW ───────────────────────────────────────────────────
 
         if sql.upper().startswith("CANNOT_ANSWER"):
             return None
@@ -113,6 +142,58 @@ def execute_sql(sql: str) -> dict:
             "failed_sql": sql
         }
 
+def describe_structured_data(query: str) -> dict | None:
+    """
+    For 'tell me about this file' type questions —
+    describe the tables and columns directly from schema.
+    """
+    if not is_document_level_question(query):
+        return None
+
+    if not has_structured_data():
+        return None
+
+    conn = get_db_connection()
+    schema = get_table_schema(conn)
+
+    # Get row counts per table
+    descriptions = []
+    cursor = conn.cursor()
+    for table, columns in schema.items():
+        cursor.execute(f"SELECT COUNT(*) FROM {table}")
+        row_count = cursor.fetchone()[0]
+        descriptions.append(
+            f"Table '{table}': {row_count} rows, "
+            f"columns: {', '.join(columns)}"
+        )
+    conn.close()
+
+    schema_summary = "\n".join(descriptions)
+
+    prompt = f"""A user asked: "{query}"
+
+The uploaded structured data contains:
+{schema_summary}
+
+Write a clear description of what this data contains based on the table and column names.
+Mention the number of rows and what kinds of information are available.
+Answer:"""
+
+    try:
+        response = requests.post(
+            OLLAMA_URL,
+            json={"model": "mistral", "prompt": prompt, "stream": False},
+            timeout=30
+        )
+        answer = response.json()["response"].strip()
+    except Exception:
+        answer = f"This file contains: {schema_summary}"
+
+    return {
+        "answer": answer,
+        "route": "schema_description",
+        "sources": [{"filename": "structured_data", "type": "schema"}]
+    }
 
 def explain_sql_result(query: str, sql: str, result: dict) -> str:
     """
@@ -165,6 +246,10 @@ def try_sql_route(query: str) -> dict | None:
     if not has_structured_data():
         return None
 
+    # Don't SQL-route questions about the file itself
+    if is_document_level_question(query):
+        return None
+    
     # Get schema
     conn = get_db_connection()
     schema = get_table_schema(conn)
@@ -200,3 +285,17 @@ def try_sql_route(query: str) -> dict | None:
         "raw_result": result.get("rows", [])[:5],
         "sources": [{"filename": "structured_data", "type": "sql_query"}]
     }
+
+# Questions about the file/document itself — NOT SQL territory
+DOCUMENT_SIGNALS = [
+    r'\babout this file\b', r'\babout the file\b',
+    r'\babout this data\b', r'\babout the dataset\b',
+    r'\bwhat is this\b', r'\bdescribe this\b',
+    r'\bsummarise\b', r'\bsummarize\b', r'\boverview\b',
+    r'\bwhat does this contain\b', r'\bwhat kind of data\b',
+]
+
+def is_document_level_question(query: str) -> bool:
+    """Questions about the file itself, not its data values."""
+    query_lower = query.lower()
+    return any(re.search(p, query_lower) for p in DOCUMENT_SIGNALS)
