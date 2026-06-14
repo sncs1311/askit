@@ -1,3 +1,4 @@
+from sql_router import try_sql_route
 from sentence_transformers import SentenceTransformer
 import chromadb
 from bm25_index import bm25_index
@@ -123,3 +124,41 @@ def retrieve(query: str, n_results: int = 5) -> list[dict]:
 
     # Return top n_results after merging
     return merged[:n_results]
+
+def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
+    """
+    Master retrieval function with SQL routing.
+
+    Order of operations:
+    1. Try SQL route — if query is analytical AND structured data exists
+    2. Fall back to hybrid vector + BM25 search
+    
+    Returns a unified response dict regardless of which route was taken.
+    """
+    # Step 1: Try SQL route first
+    sql_result = try_sql_route(query)
+    if sql_result:
+        return sql_result
+
+    # Vector search — but only if collection has documents
+    if collection.count() == 0:
+        return {
+            "answer": "No documents have been uploaded yet, or only structured data files (CSV/Excel) have been uploaded. Try asking an analytical question like 'what is the total of column X' or upload a PDF/DOCX for text-based questions.",
+            "sources": [],
+            "route": "none"
+        }
+    
+    # Step 2: Hybrid vector + BM25 search
+    chunks = retrieve(query, n_results)
+
+    if not chunks:
+        return {
+            "answer": "No documents uploaded yet.",
+            "sources": [],
+            "route": "vector"
+        }
+
+    from generator import generate_answer
+    result = generate_answer(query, chunks)
+    result["route"] = "vector"
+    return result

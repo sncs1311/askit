@@ -1,9 +1,11 @@
+from structured_parser import parse_excel, parse_csv, parse_json, parse_xml
 from bm25_index import bm25_index
 from chunker import semantic_chunk, fixed_chunk
 import pdfplumber
 import uuid
 from sentence_transformers import SentenceTransformer
 import chromadb
+import os
 
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -65,3 +67,25 @@ def ingest_pdf(file_path: str, filename: str) -> dict:
         "chunks_stored": len(chunks),
         "chunking_method": chunking_method
     }
+
+# File extension → parser mapping
+STRUCTURED_EXTENSIONS = {
+    '.xlsx': parse_excel,
+    '.xls': parse_excel,
+    '.csv': parse_csv,
+    '.json': parse_json,
+    '.xml': parse_xml,
+}
+
+def ingest_structured(file_path: str, filename: str) -> dict:
+    """
+    Route structured files to their correct parser.
+    Returns ingestion summary — no ChromaDB involved.
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    parser = STRUCTURED_EXTENSIONS.get(ext)
+
+    if not parser:
+        return {"error": f"Unsupported structured format: {ext}"}
+
+    return parser(file_path, filename)

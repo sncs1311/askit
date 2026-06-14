@@ -4,8 +4,8 @@ from pydantic import BaseModel
 import shutil
 import os
 
-from ingest import ingest_pdf
-from retriever import retrieve
+from ingest import ingest_pdf, ingest_structured, STRUCTURED_EXTENSIONS
+from retriever import retrieve_with_routing
 from generator import generate_answer
 
 app = FastAPI(title="OmniRAG", version="0.1.0 — Phase 1")
@@ -19,6 +19,9 @@ app.add_middleware(
 
 os.makedirs("uploads", exist_ok=True)
 
+# All supported extensions
+PDF_EXTENSIONS = {'.pdf'}
+STRUCTURED_EXTS = set(STRUCTURED_EXTENSIONS.keys())
 
 @app.get("/")
 def health_check():
@@ -26,16 +29,38 @@ def health_check():
 
 
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...)):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files accepted in Phase 1")
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Accepts PDF and structured data files.
+    Routes each to the correct ingestion pipeline.
+    """
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
 
-    file_path = f"uploads/{file.filename}"
+    # Validate extension
+    all_supported = PDF_EXTENSIONS | STRUCTURED_EXTS
+    if ext not in all_supported:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}. Supported: {sorted(all_supported)}"
+        )
+
+    # Save temporarily
+    file_path = f"uploads/{filename}"
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    result = ingest_pdf(file_path, file.filename)
-    os.remove(file_path)
+    # Route to correct pipeline
+    try:
+        if ext == '.pdf':
+            result = ingest_pdf(file_path, filename)
+        else:
+            result = ingest_structured(file_path, filename)
+    finally:
+        # Always clean up — even if ingestion fails
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
     return result
 
 
@@ -49,9 +74,5 @@ def query_documents(request: QueryRequest):
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-    chunks = retrieve(request.question, request.n_results)
-
-    if not chunks:
-        return {"answer": "No documents uploaded yet.", "sources": []}
-
-    return generate_answer(request.question, chunks)
+    # retrieve_with_routing handles both SQL and vector paths
+    return retrieve_with_routing(request.question, request.n_results)
