@@ -12,9 +12,11 @@ from ingest import (
     ingest_structured,
     ingest_document,
     ingest_pptx,
+    ingest_code,
     STRUCTURED_EXTENSIONS,
     DOCUMENT_EXTENSIONS,
-    PPTX_EXTENSIONS
+    PPTX_EXTENSIONS,
+    CODE_EXTENSIONS
 )
 from retriever import retrieve_with_routing
 from generator import generate_answer
@@ -38,6 +40,7 @@ PDF_EXTENSIONS = {'.pdf'}
 STRUCTURED_EXTS = set(STRUCTURED_EXTENSIONS.keys())
 DOCUMENT_EXTS = set(DOCUMENT_EXTENSIONS.keys())
 PPTX_EXTS = PPTX_EXTENSIONS
+CODE_EXTS = CODE_EXTENSIONS
 
 @app.get("/")
 def health_check():
@@ -54,7 +57,7 @@ async def upload_file(file: UploadFile = File(...)):
     ext = os.path.splitext(filename)[1].lower()
 
     # Validate extension
-    all_supported = PDF_EXTENSIONS | STRUCTURED_EXTS | DOCUMENT_EXTS | PPTX_EXTS
+    all_supported = PDF_EXTENSIONS | STRUCTURED_EXTS | DOCUMENT_EXTS | PPTX_EXTS | CODE_EXTS
     if ext not in all_supported:
         raise HTTPException(
             status_code=400,
@@ -74,6 +77,8 @@ async def upload_file(file: UploadFile = File(...)):
             result = ingest_structured(file_path, filename)
         elif ext in PPTX_EXTS:
             result = ingest_pptx(file_path, filename)
+        elif ext in CODE_EXTS:
+            result = ingest_code(file_path, filename)
         else:
             result = ingest_document(file_path, filename)
     finally:

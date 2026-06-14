@@ -1,3 +1,4 @@
+from code_parser import parse_code, TREE_SITTER_LANGUAGES, MARKUP_EXTENSIONS
 from pptx_parser import parse_pptx
 from document_parser import parse_docx, parse_txt, parse_markdown, parse_epub
 from entity_graph import entity_graph, extract_entities
@@ -114,6 +115,8 @@ DOCUMENT_EXTENSIONS = {
 }
 
 PPTX_EXTENSIONS = {'.pptx', '.ppt'}
+
+CODE_EXTENSIONS = set(TREE_SITTER_LANGUAGES.keys()) | {'.py'} | MARKUP_EXTENSIONS
 
 def ingest_structured(file_path: str, filename: str) -> dict:
     """
@@ -463,4 +466,100 @@ def ingest_pptx(file_path: str, filename: str) -> dict:
         "chunks_stored": total,
         "slides_with_tables": parse_result["slides_with_tables"],
         "slides_with_notes": parse_result["slides_with_notes"]
+    }
+
+def ingest_code(file_path: str, filename: str) -> dict:
+    """
+    Code file ingestion.
+    Each function/class → one chunk.
+    Embeds AI description, stores raw code as context.
+    """
+    parse_result = parse_code(file_path, filename)
+
+    if "error" in parse_result:
+        return parse_result
+
+    all_chunks = []
+    all_metadatas = []
+
+    # Handle text fallback (no units extracted)
+    if parse_result["type"] == "code_text_fallback":
+        return ingest_document(file_path, filename)
+
+    # Chunk 0 — file summary
+    all_chunks.append(parse_result["file_summary"])
+    all_metadatas.append({
+        "filename": filename,
+        "chunk_index": 0,
+        "total_chunks": 0,
+        "file_type": "code",
+        "language": parse_result["language"],
+        "chunk_type": "file_summary",
+        "unit_name": "__file__",
+        "unit_type": "summary"
+    })
+
+    # One chunk per code unit
+    for unit in parse_result["units"]:
+        if "error" in unit:
+            continue
+
+        # What gets embedded: description + signature
+        # What gets stored: full raw code
+        signature = f"{unit['name']}({', '.join(unit.get('parameters', []))})"
+        if unit.get('returns'):
+            signature += f" → {unit['returns']}"
+
+        embedded_text = (
+            f"[{unit['type'].upper()}] {unit['name']} in {filename}\n"
+            f"Description: {unit.get('description', unit['name'])}\n"
+            f"Signature: {signature}\n"
+            f"Lines: {unit.get('line_start', '?')}–{unit.get('line_end', '?')}\n\n"
+            f"Code:\n{unit['raw_code'][:800]}"  # cap raw code in chunk
+        )
+
+        all_chunks.append(embedded_text)
+        all_metadatas.append({
+            "filename": filename,
+            "chunk_index": len(all_chunks) - 1,
+            "total_chunks": 0,
+            "file_type": "code",
+            "language": parse_result["language"],
+            "chunk_type": "code_unit",
+            "unit_name": unit["name"],
+            "unit_type": unit["type"],
+            "line_start": unit.get("line_start", 0),
+            "line_end": unit.get("line_end", 0)
+        })
+
+    # Update total_chunks
+    total = len(all_chunks)
+    for meta in all_metadatas:
+        meta["total_chunks"] = total
+
+    # Embed and store
+    embeddings = model.encode(all_chunks).tolist()
+    ids = [str(uuid.uuid4()) for _ in all_chunks]
+
+    collection.add(
+        ids=ids,
+        embeddings=embeddings,
+        documents=all_chunks,
+        metadatas=all_metadatas
+    )
+
+    bm25_index.add(all_chunks, all_metadatas)
+
+    # Entity extraction
+    for chunk, chunk_id in zip(all_chunks, ids):
+        entities = extract_entities(chunk, chunk_id, filename)
+        entity_graph.add_chunk_entities(entities)
+
+    return {
+        "filename": filename,
+        "file_type": "code",
+        "language": parse_result["language"],
+        "units_extracted": parse_result["total_units"],
+        "chunks_stored": total,
+        "imports_found": len(parse_result.get("imports", []))
     }
