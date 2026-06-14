@@ -1,3 +1,4 @@
+from corrective_filter import filter_chunks, compute_confidence
 from sql_router import try_sql_route
 from sentence_transformers import SentenceTransformer
 import chromadb
@@ -126,39 +127,49 @@ def retrieve(query: str, n_results: int = 5) -> list[dict]:
     return merged[:n_results]
 
 def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
-    """
-    Master retrieval function with SQL routing.
-
-    Order of operations:
-    1. Try SQL route — if query is analytical AND structured data exists
-    2. Fall back to hybrid vector + BM25 search
     
-    Returns a unified response dict regardless of which route was taken.
-    """
-    # Step 1: Try SQL route first
+    # Step 0: document-level questions about structured data
+    from sql_router import describe_structured_data
+    desc_result = describe_structured_data(query)
+    if desc_result:
+        return desc_result
+
+    # Step 1: analytical SQL route
     sql_result = try_sql_route(query)
     if sql_result:
         return sql_result
 
-    # Vector search — but only if collection has documents
+    # Step 2: check collection not empty
     if collection.count() == 0:
         return {
-            "answer": "No documents have been uploaded yet, or only structured data files (CSV/Excel) have been uploaded. Try asking an analytical question like 'what is the total of column X' or upload a PDF/DOCX for text-based questions.",
+            "answer": "This information is not in the uploaded documents.",
+            "confidence": 0.0,
+            "confidence_label": "no_support",
             "sources": [],
             "route": "none"
         }
-    
-    # Step 2: Hybrid vector + BM25 search
-    chunks = retrieve(query, n_results)
 
-    if not chunks:
+    # Step 3: hybrid retrieval — fetch more than needed for filtering
+    raw_chunks = retrieve(query, n_results * 2)
+
+    # Step 4: corrective filter — drop irrelevant chunks
+    filtered_chunks = filter_chunks(raw_chunks, query)
+
+    # Step 5: abstention — nothing passed the filter
+    if not filtered_chunks:
         return {
-            "answer": "No documents uploaded yet.",
+            "answer": "This information is not in the uploaded documents.",
+            "confidence": 0.0,
+            "confidence_label": "no_support",
             "sources": [],
-            "route": "vector"
+            "route": "vector_abstained"
         }
 
+    # Step 6: trim to n_results after filtering
+    filtered_chunks = filtered_chunks[:n_results]
+
+    # Step 7: generate answer from filtered chunks
     from generator import generate_answer
-    result = generate_answer(query, chunks)
+    result = generate_answer(query, filtered_chunks)
     result["route"] = "vector"
     return result
