@@ -11,8 +11,10 @@ from ingest import (
     ingest_pdf,
     ingest_structured,
     ingest_document,
+    ingest_pptx,
     STRUCTURED_EXTENSIONS,
-    DOCUMENT_EXTENSIONS
+    DOCUMENT_EXTENSIONS,
+    PPTX_EXTENSIONS
 )
 from retriever import retrieve_with_routing
 from generator import generate_answer
@@ -35,6 +37,7 @@ os.makedirs("uploads", exist_ok=True)
 PDF_EXTENSIONS = {'.pdf'}
 STRUCTURED_EXTS = set(STRUCTURED_EXTENSIONS.keys())
 DOCUMENT_EXTS = set(DOCUMENT_EXTENSIONS.keys())
+PPTX_EXTS = PPTX_EXTENSIONS
 
 @app.get("/")
 def health_check():
@@ -51,7 +54,7 @@ async def upload_file(file: UploadFile = File(...)):
     ext = os.path.splitext(filename)[1].lower()
 
     # Validate extension
-    all_supported = PDF_EXTENSIONS | STRUCTURED_EXTS | DOCUMENT_EXTS
+    all_supported = PDF_EXTENSIONS | STRUCTURED_EXTS | DOCUMENT_EXTS | PPTX_EXTS
     if ext not in all_supported:
         raise HTTPException(
             status_code=400,
@@ -69,8 +72,10 @@ async def upload_file(file: UploadFile = File(...)):
             result = ingest_pdf(file_path, filename)
         elif ext in STRUCTURED_EXTS:
             result = ingest_structured(file_path, filename)
+        elif ext in PPTX_EXTS:
+            result = ingest_pptx(file_path, filename)
         else:
-            result = ingest_document(file_path, filename)  # ← catches docx, txt, md, epub
+            result = ingest_document(file_path, filename)
     finally:
         # Always clean up — even if ingestion fails
         if os.path.exists(file_path):

@@ -1,3 +1,4 @@
+from pptx_parser import parse_pptx
 from document_parser import parse_docx, parse_txt, parse_markdown, parse_epub
 from entity_graph import entity_graph, extract_entities
 from structured_parser import parse_excel, parse_csv, parse_json, parse_xml
@@ -111,6 +112,8 @@ DOCUMENT_EXTENSIONS = {
     '.markdown': parse_markdown,
     '.epub': parse_epub,
 }
+
+PPTX_EXTENSIONS = {'.pptx', '.ppt'}
 
 def ingest_structured(file_path: str, filename: str) -> dict:
     """
@@ -333,3 +336,131 @@ def ingest_document(file_path: str, filename: str) -> dict:
             result[key] = parse_result[key]
 
     return result
+
+def ingest_pptx(file_path: str, filename: str) -> dict:
+    """
+    PPTX ingestion — slide-by-slide chunking.
+    Each slide = one chunk minimum.
+    Richer metadata: slide_number, has_tables, has_notes.
+    """
+    parse_result = parse_pptx(file_path, filename)
+
+    if "error" in parse_result:
+        return parse_result
+
+    all_chunks = []
+    all_metadatas = []
+
+    # Chunk 0 — presentation metadata
+    all_chunks.append(parse_result["presentation_meta"])
+    all_metadatas.append({
+        "filename": filename,
+        "chunk_index": 0,
+        "total_chunks": 0,  # updated below
+        "file_type": "pptx",
+        "slide_number": 0,
+        "chunk_type": "presentation_meta",
+        "has_tables": False,
+        "has_notes": False
+    })
+
+    # Chunk 1 — summary of all slide titles
+    all_chunks.append(parse_result["summary"])
+    all_metadatas.append({
+        "filename": filename,
+        "chunk_index": 1,
+        "total_chunks": 0,
+        "file_type": "pptx",
+        "slide_number": 0,
+        "chunk_type": "summary",
+        "has_tables": False,
+        "has_notes": False
+    })
+
+    # One chunk per slide (split if slide is very long)
+    for slide_data in parse_result["slides"]:
+        slide_text = slide_data["text"]
+
+        if len(slide_text) <= 800:
+            # Short slide — one chunk
+            all_chunks.append(slide_text)
+            all_metadatas.append({
+                "filename": filename,
+                "chunk_index": len(all_chunks) - 1,
+                "total_chunks": 0,
+                "file_type": "pptx",
+                "slide_number": slide_data["slide_number"],
+                "chunk_type": "slide",
+                "has_tables": slide_data["has_tables"],
+                "has_notes": slide_data["has_notes"]
+            })
+        else:
+            # Long slide — split at double newline boundaries
+            parts = slide_text.split('\n\n')
+            current = ""
+            part_num = 0
+
+            for part in parts:
+                if len(current) + len(part) <= 800:
+                    current += part + '\n\n'
+                else:
+                    if current.strip():
+                        all_chunks.append(current.strip())
+                        all_metadatas.append({
+                            "filename": filename,
+                            "chunk_index": len(all_chunks) - 1,
+                            "total_chunks": 0,
+                            "file_type": "pptx",
+                            "slide_number": slide_data["slide_number"],
+                            "chunk_type": f"slide_part_{part_num}",
+                            "has_tables": slide_data["has_tables"],
+                            "has_notes": slide_data["has_notes"]
+                        })
+                        part_num += 1
+                    current = part + '\n\n'
+
+            if current.strip():
+                all_chunks.append(current.strip())
+                all_metadatas.append({
+                    "filename": filename,
+                    "chunk_index": len(all_chunks) - 1,
+                    "total_chunks": 0,
+                    "file_type": "pptx",
+                    "slide_number": slide_data["slide_number"],
+                    "chunk_type": f"slide_part_{part_num}",
+                    "has_tables": slide_data["has_tables"],
+                    "has_notes": slide_data["has_notes"]
+                })
+
+    # Update total_chunks in all metadata
+    total = len(all_chunks)
+    for meta in all_metadatas:
+        meta["total_chunks"] = total
+
+    # Embed and store
+    embeddings = model.encode(all_chunks).tolist()
+    ids = [str(uuid.uuid4()) for _ in all_chunks]
+
+    collection.add(
+        ids=ids,
+        embeddings=embeddings,
+        documents=all_chunks,
+        metadatas=all_metadatas
+    )
+
+    bm25_index.add(all_chunks, all_metadatas)
+
+    # Entity extraction
+    for chunk, chunk_id in zip(all_chunks, ids):
+        entities = extract_entities(chunk, chunk_id, filename)
+        entity_graph.add_chunk_entities(entities)
+
+    return {
+        "filename": filename,
+        "file_type": "pptx",
+        "total_slides": parse_result["total_slides"],
+        "slides_extracted": parse_result["slides_extracted"],
+        "chunks_stored": total,
+        "slides_with_tables": parse_result["slides_with_tables"],
+        "slides_with_notes": parse_result["slides_with_notes"]
+    }
