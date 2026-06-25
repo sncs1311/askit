@@ -278,12 +278,18 @@ export default function OmniRAGChat() {
           </button>
 
           <span
+            onClick={handleClear}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter") handleClear(); }}
+            aria-label="Clear current document and return to start"
             style={{
               fontFamily: "'Fraunces', serif",
               fontSize: 19,
               fontWeight: 500,
               letterSpacing: "-0.01em",
               fontStyle: "italic",
+              cursor: "pointer",
             }}
           >
             Omni<span style={{ color: p.gold }}>RAG</span>
@@ -296,7 +302,7 @@ export default function OmniRAGChat() {
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
+                gap: 10,
                 fontSize: 12,
                 color: p.inkDim,
                 fontFamily: "'JetBrains Mono', monospace",
@@ -316,6 +322,25 @@ export default function OmniRAGChat() {
                 {docInfo.filename}
               </span>
               <button
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Upload a different document"
+                className="hover-fade"
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.03em",
+                  border: `1px solid ${p.rule}`,
+                  borderRadius: 14,
+                  padding: "3px 10px",
+                  background: "transparent",
+                  color: p.inkDim,
+                  cursor: "pointer",
+                  opacity: 0.85,
+                  fontFamily: "'JetBrains Mono', monospace",
+                }}
+              >
+                Swap
+              </button>
+              <button
                 onClick={handleClear}
                 aria-label="Remove document"
                 className="hover-fade"
@@ -325,6 +350,13 @@ export default function OmniRAGChat() {
               </button>
             </div>
           )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: "none" }}
+            onChange={(e) => handleUpload(e.target.files?.[0])}
+          />
 
           <a
             href={`${API_BASE}/docs`}
@@ -539,7 +571,7 @@ export default function OmniRAGChat() {
                   position: "relative",
                 }}
               >
-                <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={(e) => handleUpload(e.target.files?.[0])} />
+                <input type="file" style={{ display: "none" }} onChange={(e) => handleUpload(e.target.files?.[0])} />
                 <div
                   style={{
                     width: 1,

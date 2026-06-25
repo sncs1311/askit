@@ -129,15 +129,17 @@ def retrieve(query: str, n_results: int = 5) -> list[dict]:
     return merged[:n_results]
 
 SUMMARY_SIGNALS = [
-    r'\bwhat is this (file|document) about\b',
-    r'\bsummarise\b', r'\bsummarize\b',
-    r'\bgive (me )?a summary\b',
-    r'\boverview\b', r'\bwhat does this (file|document) (say|contain|cover)\b',
-    r'\bwhat is (in|inside) this\b',
+    r'\bsummar(y|ise|ize)\b',
+    r'\boverview\b',
+    r'\bwhat.{0,20}(this|the) (file|document|doc|pdf|content|presentation|spreadsheet|code)s?.{0,15}(about|contain|cover|say|mean)\b',
+    r'\bwhat.{0,10}(in|inside|on)\b.{0,15}(this|the) (file|document|doc)',
+    r'\btell me about (this|the) (file|document)\b',
+    r'\bdescribe (this|the) (file|document)\b',
+    r'\bwhat is this\b',
 ]
 
 def is_summary_query(query: str) -> bool:
-    q = query.lower()
+    q = query.lower().strip().rstrip('?!.')
     return any(re.search(p, q) for p in SUMMARY_SIGNALS)
 
 def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
@@ -158,25 +160,53 @@ def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
             "sources": [], "route": "none"
         }
 
-    # ── NEW: dedicated summary handling ────────────────────────────────────
+    # ── Summary handling — triggered by phrasing OR as a fallback below ────
+    def run_summary_path():
+        """
+        Pulls a SPREAD of chunks across the whole document — not just
+        the first N in insertion order — so a multi-page PDF or
+        multi-slide deck gets representative coverage, not just page 1.
+        """
+        total = collection.count()
+        sample_size = min(10, total)
+
+        if total <= sample_size:
+            # Small doc — just grab everything
+            sample = collection.get(include=["documents", "metadatas"])
+        else:
+            # Spread evenly across the whole document using ChromaDB's
+            # internal ordering as a proxy for chunk position
+            all_ids = collection.get(include=[])["ids"]
+            step = max(1, len(all_ids) // sample_size)
+            picked_ids = all_ids[::step][:sample_size]
+            sample = collection.get(ids=picked_ids, include=["documents", "metadatas"])
+
+        if not sample or not sample.get("documents"):
+            return None
+
+        combined = '\n\n---\n\n'.join(sample["documents"])
+        filename = sample["metadatas"][0].get("filename", "document") if sample["metadatas"] else "document"
+
+        fake_chunks = [{
+            "text": combined,
+            "filename": filename,
+            "distance": 0.1
+        }]
+
+        from generator import generate_answer
+        result = generate_answer(
+            "Provide a clear, well-organised summary of what this document covers overall, "
+            "based on the passages provided.",
+            fake_chunks
+        )
+        result["route"] = "summary"
+        return result
+
     if is_summary_query(query):
-        # Pull a broad sample across the whole document, not threshold-filtered
-        sample = collection.get(limit=8, include=["documents", "metadatas"])
-        if sample and sample["documents"]:
-            combined = '\n\n'.join(sample["documents"])
-            fake_chunks = [{
-                "text": combined,
-                "filename": sample["metadatas"][0].get("filename", "document"),
-                "distance": 0.1
-            }]
-            from generator import generate_answer
-            result = generate_answer(
-                "Provide a clear summary of what this document covers overall",
-                fake_chunks
-            )
-            result["route"] = "summary"
-            return result
-    # ── END summary handling ────────────────────────────────────────────────
+        summary_result = run_summary_path()
+        if summary_result:
+            return summary_result
+    # ── End explicit summary handling ───────────────────────────────────────
 
     raw_chunks = retrieve(query, n_results * 2)
 
@@ -191,11 +221,19 @@ def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
 
     filtered_chunks = filter_chunks(raw_chunks, query)
 
-    # ── NEW: smart abstention with suggestions ────────────────────────────
+    # ── Fallback: if normal retrieval found nothing, try summary mode ──────
+    # This is the real safety net — catches vague questions that didn't
+    # match the SUMMARY_SIGNALS regex but also don't match specific content
+    if not filtered_chunks:
+        summary_result = run_summary_path()
+        if summary_result:
+            summary_result["route"] = "summary_fallback"
+            return summary_result
+    # ── End fallback ─────────────────────────────────────────────────────────
+
     if not filtered_chunks:
         from corrective_filter import find_closest_terms
 
-        # Get all chunk text for vocabulary matching
         all_text = [c["text"] for c in raw_chunks]
         suggestions = find_closest_terms(query, all_text)
 
@@ -218,7 +256,6 @@ def retrieve_with_routing(query: str, n_results: int = 5) -> dict:
             "suggestions": suggestions,
             "route": "vector_abstained"
         }
-    # ── END smart abstention ───────────────────────────────────────────────
 
     filtered_chunks = filtered_chunks[:n_results]
     from generator import generate_answer
