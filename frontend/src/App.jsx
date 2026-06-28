@@ -646,21 +646,24 @@ export default function AskitChat() {
             <div ref={scrollRef} className="scrollbar" style={{ flex: 1, overflowY: "auto", padding: "0 32px" }}>
               <div style={{ maxWidth: 660, margin: "0 auto", padding: "32px 0 20px" }}>
                 {messages.map((msg) => (
-                  <div key={msg.id} className="msg-enter" style={{ marginBottom: 40 }}>
+                  <div key={msg.id} className="msg-enter" style={{ marginBottom: 40, display: "flex", flexDirection: "column", alignItems: msg.role === "user" ? "flex-end" : "flex-start" }}>
+
                     {msg.role === "user" ? (
-                      <div>
-                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: t.inkFaint, marginBottom: 8 }}>
-                          You
-                        </div>
-                        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 17, fontWeight: 400, lineHeight: 1.55, color: t.inkDim }}>
-                          {msg.text}
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <div style={{ maxWidth: "75%" }}>
+                          <div style={{ fontFamily: "'DM Mono', monospace", fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: t.inkFaint, marginBottom: 8, textAlign: "right" }}>
+                            You
+                          </div>
+                          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 17, fontWeight: 400, lineHeight: 1.55, color: t.inkDim, background: t.tag, border: `1px solid ${t.border}`, borderRadius: "14px 14px 4px 14px", padding: "10px 16px", textAlign: "left" }}>
+                            {msg.text}
+                          </div>
                         </div>
                       </div>
                     ) : (
-                      <div style={{ display: "flex", gap: 16 }}>
+                      <div style={{ display: "flex", gap: 16, maxWidth: "75%" }}>
                         <div style={{ width: 2, borderRadius: 2, flexShrink: 0, background: msg.error ? t.low : ACCENT, opacity: msg.error ? 0.7 : 0.4, marginTop: 4, minHeight: 20 }} />
                         <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 15.5, lineHeight: 1.82, color: msg.error ? t.low : t.ink, whiteSpace: "pre-wrap", fontFamily: "'DM Sans', sans-serif" }}>
+                          <div style={{ fontSize: 15.5, lineHeight: 1.82, color: msg.error ? t.low : t.ink, whiteSpace: "pre-wrap", fontFamily: "'DM Sans', sans-serif", textAlign: "left" }}>
                             {msg.text}
                           </div>
 
