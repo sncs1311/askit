@@ -250,7 +250,9 @@ class EntityGraph:
             return
         with open(GRAPH_PATH, "r") as f:
             data = json.load(f)
-        self.graph = nx.node_link_graph(data, edges="edges") if "edges" in data else nx.node_link_graph(data, edges="links") if "links" in data else nx.DiGraph()
+        if not data or "nodes" not in data:
+            return
+        self.graph = nx.node_link_graph(data)
 
 
 # ── Module-level singleton ────────────────────────────────────────────────
