@@ -23,7 +23,7 @@ Upload anything. Ask anything. Get grounded, cited answers — entirely on your 
 
 Most RAG tutorials build the same thing: split a PDF into fixed chunks → embed → store in ChromaDB → ask GPT. That works for demos. It fails in production.
 
-| Failure Mode | Standard RAG | OmniRAG |
+| Failure Mode | Standard RAG | Askit |
 |---|---|---|
 | Fixed chunking destroys table/code structure | ❌ Breaks | ✅ Semantic boundary chunking |
 | Excel / structured data queries | ❌ Hallucinates | ✅ SQL router → SQLite |
@@ -123,8 +123,8 @@ Most RAG tutorials build the same thing: split a PDF into fixed chunks → embed
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/sncs1311/omnirag.git
-cd omnirag
+git clone https://github.com/sncs1311/askit.git
+cd askit
 ```
 
 ### 2. Create virtual environment
@@ -191,7 +191,7 @@ Upload a file via `POST /upload`, then ask questions via `POST /query`. That's i
 ## 📂 Project Structure
 
 ```
-omnirag/
+askit/
 ├── main.py                  # FastAPI server — all routes
 ├── ingest.py                # File ingestion pipeline
 ├── retriever.py             # Hybrid search (BM25 + dense + RRF)
