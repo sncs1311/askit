@@ -94,15 +94,20 @@ class EntityGraph:
         Add entities from one chunk to the graph.
         Creates nodes if new, updates existing nodes.
         Creates edges between all entity pairs in this chunk.
+    
+        NOTE: no longer calls self.save() here — saving moved to the
+        caller's responsibility, called ONCE after all chunks in a
+        document are processed. Calling save() per-chunk was rewriting
+        the entire graph to disk on every call, making ingestion of a
+        2069-chunk document take ~60s on this step alone (verified).
         """
         if not entities:
             return
-
+    
         for ent in entities:
             node_id = ent["text"]
-
+    
             if node_id not in self.graph:
-                # New entity — create node
                 self.graph.add_node(
                     node_id,
                     type=ent["type"],
@@ -110,28 +115,21 @@ class EntityGraph:
                     filenames=[ent["filename"]]
                 )
             else:
-                # Existing entity — append source info
                 node_data = self.graph.nodes[node_id]
-
                 if ent["chunk_id"] not in node_data["chunk_ids"]:
                     node_data["chunk_ids"].append(ent["chunk_id"])
-
                 if ent["filename"] not in node_data["filenames"]:
                     node_data["filenames"].append(ent["filename"])
-
-        # Create edges between every pair of entities in this chunk
-        # They co-occurred → they're related
+    
         entity_texts = [e["text"] for e in entities]
-
+    
         for text_a, text_b in combinations(entity_texts, 2):
             if self.graph.has_edge(text_a, text_b):
-                # Strengthen existing edge
                 self.graph[text_a][text_b]["weight"] += 1
             else:
-                # New relationship
                 self.graph.add_edge(text_a, text_b, weight=1)
-
-        self.save()
+    
+        # self.save() removed from here — caller saves once after the full loop
 
     def query_graph(self, query_text: str, max_depth: int = 2) -> list[str]:
         """

@@ -68,6 +68,8 @@ def ingest_pdf(file_path: str, filename: str) -> dict:
         entities = extract_entities(chunk, chunk_id, filename)
         entity_graph.add_chunk_entities(entities)
 
+    entity_graph.save()
+
     return {
         "filename": filename,
         "pages_processed": page_count,
@@ -305,6 +307,8 @@ def ingest_document(file_path: str, filename: str) -> dict:
         entities = extract_entities(chunk, chunk_id, filename)
         entity_graph.add_chunk_entities(entities)
 
+    entity_graph.save()
+
     # Build result
     result = {
         "filename": filename,
@@ -438,6 +442,8 @@ def ingest_pptx(file_path: str, filename: str) -> dict:
         entities = extract_entities(chunk, chunk_id, filename)
         entity_graph.add_chunk_entities(entities)
 
+    entity_graph.save()
+
     return {
         "filename": filename,
         "file_type": "pptx",
@@ -534,6 +540,8 @@ def ingest_code(file_path: str, filename: str) -> dict:
     for chunk, chunk_id in zip(all_chunks, ids):
         entities = extract_entities(chunk, chunk_id, filename)
         entity_graph.add_chunk_entities(entities)
+    
+    entity_graph.save()
 
     return {
         "filename": filename,
