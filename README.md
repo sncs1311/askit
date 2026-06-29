@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔍 OmniRAG
+# 🔍 Askit
 
 ### Production-grade Retrieval-Augmented Generation — locally, for everything.
 
@@ -10,7 +10,7 @@
 [![Ollama](https://img.shields.io/badge/Ollama-local_LLM-black?style=flat)](https://ollama.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**OmniRAG** addresses six documented failure modes in production RAG systems — simultaneously, with zero cloud dependency.  
+**Askit** addresses six documented failure modes in production RAG systems — simultaneously, with zero cloud dependency.  
 Upload anything. Ask anything. Get grounded, cited answers — entirely on your own machine.
 
 [Features](#-features) · [Architecture](#️-architecture) · [Quickstart](#-quickstart) · [File Support](#-supported-file-types) · [Roadmap](#-roadmap)
